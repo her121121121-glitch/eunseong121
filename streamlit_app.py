@@ -13,6 +13,126 @@ st.title("🎈 Streamlit — 단일 페이지 요소 예시")  # [1]
 
 st.write("아래는 한 페이지에 넣을 수 있는 여러 Streamlit 요소의 예시입니다.")  # [2]
 
+# --- 성적 데이터 업로드 및 대화형 시각화
+st.markdown("## 🎓 성적 데이터 시각화 도구")
+st.write(
+    "CSV 파일을 업로드하면 해당 데이터의 열(변수)을 기반으로 히스토그램, 막대그래프, 산점도, 상자그림을 그릴 수 있습니다."
+)
+
+uploaded_csv = st.file_uploader("CSV 파일 업로드 (예: 성적 데이터)", type=["csv"])  # 사용자가 올릴 CSV
+
+if uploaded_csv is not None:
+    try:
+        df_uploaded = pd.read_csv(uploaded_csv)
+    except Exception as e:
+        st.error(f"CSV를 읽는 중 오류가 발생했습니다: {e}")
+        df_uploaded = None
+
+    if df_uploaded is not None:
+        st.success("CSV가 업로드되어 데이터프레임으로 로드되었습니다.")
+        st.dataframe(df_uploaded.head())
+
+        # 열 타입 분류
+        numeric_cols = df_uploaded.select_dtypes(include=[np.number]).columns.tolist()
+        categorical_cols = df_uploaded.select_dtypes(include=["object", "category"]).columns.tolist()
+
+        if len(numeric_cols) == 0:
+            st.warning("데이터에 숫자형 열이 없습니다. 히스토그램/산점도/상자그림을 사용하려면 숫자형 열이 필요합니다.")
+
+        tab_hist, tab_bar, tab_scatter, tab_box = st.tabs(["히스토그램", "막대그래프", "산점도", "상자그림"])
+
+        # 히스토그램
+        with tab_hist:
+            st.write("히스토그램: 숫자형 변수를 선택해 분포를 확인하세요.")
+            if numeric_cols:
+                hist_col = st.selectbox("히스토그램 변수", numeric_cols)
+                bins = st.slider("빈 개수", 5, 200, 30)
+                chart = alt.Chart(df_uploaded).mark_bar().encode(
+                    x=alt.X(f"{hist_col}:Q", bin=alt.Bin(maxbins=bins)),
+                    y="count():Q",
+                ).properties(height=350)
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                st.info("숫자형 열이 없습니다.")
+
+        # 막대그래프
+        with tab_bar:
+            st.write("막대그래프: 범주형(또는 집계)과 숫자형 변수를 선택합니다.")
+            if categorical_cols:
+                bar_cat = st.selectbox("범주형 변수 (X)", categorical_cols)
+                agg_func = st.selectbox("집계 함수", ["mean", "sum", "median", "count"], index=0)
+                if agg_func == "count":
+                    agg_chart = alt.Chart(df_uploaded).mark_bar().encode(
+                        x=alt.X(f"{bar_cat}:N"),
+                        y=alt.Y("count():Q"),
+                    ).properties(height=350)
+                else:
+                    # 숫자형 선택 항목
+                    if numeric_cols:
+                        bar_num = st.selectbox("숫자형 변수 (Y)", numeric_cols)
+                        agg_chart = alt.Chart(df_uploaded).mark_bar().encode(
+                            x=alt.X(f"{bar_cat}:N"),
+                            y=alt.Y(f"{bar_num}:Q", aggregate=agg_func),
+                        ).properties(height=350)
+                    else:
+                        st.info("집계할 숫자형 열이 없습니다.")
+                        agg_chart = None
+
+                if 'agg_chart' in locals() and agg_chart is not None:
+                    st.altair_chart(agg_chart, use_container_width=True)
+            else:
+                st.info("범주형(문자열/카테고리) 열이 없습니다.")
+
+        # 산점도
+        with tab_scatter:
+            st.write("산점도: X, Y 숫자형 변수를 선택하세요. 색상은 선택적입니다.")
+            if len(numeric_cols) >= 2:
+                x_col = st.selectbox("X 변수", numeric_cols, index=0)
+                y_col = st.selectbox("Y 변수", [c for c in numeric_cols if c != x_col], index=0)
+                color_col = None
+                if categorical_cols:
+                    color_col = st.selectbox("색상(선택) - 범주형", [None] + categorical_cols)
+                scatter_chart = alt.Chart(df_uploaded).mark_point().encode(
+                    x=alt.X(f"{x_col}:Q"),
+                    y=alt.Y(f"{y_col}:Q"),
+                    color=alt.Color(f"{color_col}:N") if color_col else None,
+                    tooltip=[x_col, y_col] + ([color_col] if color_col else []),
+                ).properties(height=400)
+                st.altair_chart(scatter_chart, use_container_width=True)
+            else:
+                st.info("산점도는 최소 2개의 숫자형 열이 필요합니다.")
+
+        # 상자그림
+        with tab_box:
+            st.write("상자그림(Boxplot): 숫자형 변수와(선택적으로) 그룹별 비교용 범주형 변수를 선택하세요.")
+            if numeric_cols:
+                box_num = st.selectbox("상자그림 숫자형 변수", numeric_cols)
+                box_group = None
+                if categorical_cols:
+                    box_group = st.selectbox("그룹(선택)", [None] + categorical_cols)
+
+                if box_group:
+                    box_chart = alt.Chart(df_uploaded).mark_boxplot().encode(
+                        x=alt.X(f"{box_group}:N"),
+                        y=alt.Y(f"{box_num}:Q"),
+                    ).properties(height=350)
+                else:
+                    # 전체 데이터에 대한 상자그림 (단일 그룹)
+                    df_tmp = df_uploaded.copy()
+                    df_tmp["__all"] = "all"
+                    box_chart = alt.Chart(df_tmp).mark_boxplot().encode(
+                        x=alt.X("__all:N", title="All"),
+                        y=alt.Y(f"{box_num}:Q"),
+                    ).properties(height=350)
+
+                st.altair_chart(box_chart, use_container_width=True)
+            else:
+                st.info("상자그림을 그리려면 숫자형 열이 필요합니다.")
+
+else:
+    st.info("성적 데이터 CSV를 업로드하면 자동으로 변수 선택 UI가 나타나고, 선택한 변수로 그래프를 그립니다.")
+
+
 # --- 상단 텍스트와 마크다운
 st.header("텍스트와 마크다운")  # [3]
 st.subheader("간단한 설명")  # [4]
